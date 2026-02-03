@@ -11,12 +11,12 @@ const LOGIN_USERNAME_SELECTOR = "#username";
 const LOGIN_PASSWORD_SELECTOR = "#password";
 const LOGIN_SUBMIT_SELECTOR = "#login-submit";
 const DRAFTS_PAGE_LINK_SELECTOR = "a[href='/nameh/pishnevis']"; // Link to "پیش نویس" page
-const ADD_DRAFT_BUTTON_SELECTOR = "#start-process-btn"; // "افزودن پیش نویس جدید" 
+const ADD_DRAFT_BUTTON_SELECTOR = "#start-process-btn"; // "افزودن پیش نویس جدید"
 const MODAL_SELECTOR = "#user-task-modal";
 const FORM_READY_LOG = "FORM_READY"; // Optional: If your app logs this in console for modal ready
 
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
-const AUTH_USERNAME = process.env.AUTH_PASSWORD || "1";
+const AUTH_USERNAME = process.env.AUTH_USERNAME || "1";
 
 (async () => {
   console.log(
@@ -118,6 +118,83 @@ const AUTH_USERNAME = process.env.AUTH_PASSWORD || "1";
         if (!res) throw new Error("Timeout waiting for modal");
 
         const elapsed = res.ts - clickT0;
+
+        const modal = page.locator(MODAL_SELECTOR);
+        await page.waitForTimeout(2000);
+
+        // Text fields & textareas (skip hidden)
+        const textFields = await modal
+          .locator(
+            'input[type="text"]:visible, input:not([type]):visible, textarea:visible',
+          )
+          .all();
+        for (const el of textFields) {
+          try {
+            const key =
+              (await el.getAttribute("name")) ||
+              (await el.getAttribute("id")) ||
+              "";
+            let value = Math.floor(Math.random() * 1000000).toString(); // Use numbers to avoid int conversion errors
+            if (key.includes("tarikhNameh") || key.includes("mohlatPasokh")) {
+              // Jalali date
+              const today = new Date();
+              const jalaliYear = today.getFullYear() - 621;
+              const jalaliMonth = String(today.getMonth() + 1).padStart(2, "0");
+              const jalaliDay = String(today.getDate()).padStart(2, "0");
+              value = `${jalaliYear}/${jalaliMonth}/${jalaliDay}`;
+              await el.click(); // Open picker if any
+              await el.fill(value);
+              await page.keyboard.press("Enter"); // Close picker
+            } else {
+              await el.fill(value);
+            }
+            console.log(`Filled text field ${key} with ${value}`);
+          } catch (e) {
+            console.log(`Text field fill fail: ${e.message}`);
+          }
+        }
+
+        // Selects (choicesjs)
+        const choicesContainers = await modal.locator(".choices:visible").all();
+        for (const container of choicesContainers) {
+          try {
+            await container.click(); // Open dropdown
+            await page.waitForSelector(
+              ".choices__list--dropdown .choices__item--selectable",
+              { timeout: 10000 },
+            );
+            await page
+              .locator(".choices__list--dropdown .choices__item--selectable")
+              .first()
+              .click();
+            console.log(`Selected first option in choicesjs`);
+          } catch (e) {
+            console.log(`Choicesjs select fail: ${e.message}`);
+          }
+        }
+
+        // Submit
+        const submitBtn = modal.locator(
+          'button[action="submit"], button#nextStepBtn, button:has-text("مرحله بعد"), button:has-text("ثبت"), button:has-text("ارسال"), .formio-submit',
+        );
+        await submitBtn
+          .click({ timeout: 10000 })
+          .catch((e) => console.log(`Submit fail: ${e.message}`));
+        console.log(`User ${username} submitted form`);
+
+        // Confirm success
+        await page
+          .waitForSelector(
+            "text=موفقیت|پیش‌نویس با موفقیت ذخیره شد.|Task completed|ارسال شد",
+            { timeout: 20000 },
+          )
+          .then(() =>
+            console.log(`User ${username} - Form submitted successfully`),
+          )
+          .catch(() =>
+            console.log(`User ${username} - No confirmation detected`),
+          );
+
         return {
           index,
           username,
