@@ -3,20 +3,18 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 
 const APP_URL = process.env.APP_URL || "http://localhost:4200/login";
-const NUM_USERS = parseInt(process.argv[2], 10) || 2;
+const NUM_USERS = parseInt(process.argv[2], 10) || 1;
 const LAUNCH_HEADLESS = false; // Set to false for visible browsers (headful mode)
 const NAV_TIMEOUT = 30000;
 
 const LOGIN_USERNAME_SELECTOR = "#username";
 const LOGIN_PASSWORD_SELECTOR = "#password";
 const LOGIN_SUBMIT_SELECTOR = "#login-submit";
-const DRAFTS_PAGE_LINK_SELECTOR = "a[href='/nameh/pishnevis']"; // Link to "پیش نویس" page
 const ADD_DRAFT_BUTTON_SELECTOR = "#start-process-btn"; // "افزودن پیش نویس جدید"
 const MODAL_SELECTOR = "#user-task-modal";
 const FORM_READY_LOG = "FORM_READY"; // Optional: If your app logs this in console for modal ready
 
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
-const AUTH_USERNAME = process.env.AUTH_USERNAME || "1";
 
 (async () => {
   console.log(
@@ -52,7 +50,7 @@ const AUTH_USERNAME = process.env.AUTH_USERNAME || "1";
   const results = await Promise.all(
     contexts.map(async (c) => {
       const { index, page, consoleMessages } = c;
-      const username = AUTH_USERNAME; // "1", "2", etc.
+      const username = "1"; // "1", "2", etc.
       const password = AUTH_PASSWORD;
 
       try {
@@ -64,14 +62,12 @@ const AUTH_USERNAME = process.env.AUTH_USERNAME || "1";
         await page.fill(LOGIN_USERNAME_SELECTOR, username);
         await page.fill(LOGIN_PASSWORD_SELECTOR, password);
         await page.click(LOGIN_SUBMIT_SELECTOR);
-        await page.waitForSelector(DRAFTS_PAGE_LINK_SELECTOR, {
-          timeout: 20000,
-        }); // Confirm login success
 
+        // Confirm login success by URL change
+        await page.waitForURL("**/user-panel", { timeout: 20000 });
         console.log(`User ${username} logged in and redirected`);
 
         // 2. Navigate to "پیش نویس" page
-        // Go directly to pishnevis page
         await page.goto("http://localhost:4200/nameh/pishnevis", {
           waitUntil: "domcontentloaded",
           timeout: NAV_TIMEOUT,
@@ -79,7 +75,7 @@ const AUTH_USERNAME = process.env.AUTH_USERNAME || "1";
 
         console.log(`User ${username} navigated directly to /nameh/pishnevis`);
 
-        // 4. Wait for the add new draft button to appear
+        // Wait for the add new draft button to appear
         await page.waitForSelector(ADD_DRAFT_BUTTON_SELECTOR, {
           timeout: 15000,
           state: "visible",
@@ -118,8 +114,12 @@ const AUTH_USERNAME = process.env.AUTH_USERNAME || "1";
         if (!res) throw new Error("Timeout waiting for modal");
 
         const elapsed = res.ts - clickT0;
+        console.log(`User ${username} modal opened in ${elapsed}ms`);
 
-        const modal = page.locator(MODAL_SELECTOR);
+        // Automate first form filling
+        let modal = page.locator(MODAL_SELECTOR);
+
+        // Give Form.io time to load APIs
         await page.waitForTimeout(2000);
 
         // Text fields & textareas (skip hidden)
@@ -173,14 +173,14 @@ const AUTH_USERNAME = process.env.AUTH_USERNAME || "1";
           }
         }
 
-        // Submit
+        // Submit first form
         const submitBtn = modal.locator(
           'button[action="submit"], button#nextStepBtn, button:has-text("مرحله بعد"), button:has-text("ثبت"), button:has-text("ارسال"), .formio-submit',
         );
         await submitBtn
           .click({ timeout: 10000 })
-          .catch((e) => console.log(`Submit fail: ${e.message}`));
-        console.log(`User ${username} submitted form`);
+          .catch((e) => console.log(`First submit fail: ${e.message}`));
+        console.log(`User ${username} submitted first form`);
 
         // Confirm success
         await page
@@ -195,6 +195,62 @@ const AUTH_USERNAME = process.env.AUTH_USERNAME || "1";
             console.log(`User ${username} - No confirmation detected`),
           );
 
+        // Handle second form (assuming modal reappears or stays open after first submit)
+        console.log(`User ${username} waiting for second form/modal`);
+        try {
+          // Wait for modal to be ready for second task (reuse selector, with timeout)
+          await page.waitForSelector(MODAL_SELECTOR, {
+            timeout: 20000,
+            state: "visible",
+          });
+
+          // Give Form.io time to load APIs for second form
+          await page.waitForTimeout(2000);
+
+          modal = page.locator(MODAL_SELECTOR);
+
+          // Fill CKEditor content (target the editable div instead of textarea)
+          const editable = modal.locator(".ck-editor__editable:visible");
+          if ((await editable.count()) > 0) {
+            const randomText = `Automated test content: ${Math.floor(Math.random() * 1000000)}`;
+            await editable.click(); // Focus the editor
+            await editable.fill(randomText); // Fill works for contenteditable; fallback to .type(randomText) if needed
+            console.log(
+              `User ${username} filled second form CKEditor with: ${randomText}`,
+            );
+          } else {
+            console.log(
+              `User ${username} - No CKEditor editable found in second form; skipping fill`,
+            );
+            // If this logs, inspect the DOM (e.g., page.evaluate(() => document.querySelector('#user-task-modal').innerHTML)) and adjust selector
+          }
+
+          // Submit second form (make locator more specific to avoid CKEditor button)
+          const secondSubmitBtn = modal.locator(
+            'button[type="submit"][name="data[submit]"].btn.btn-success:has-text("ذخیره")', // Targets the Form.io button precisely (class, name, type, text)
+          );
+          await secondSubmitBtn.click({ timeout: 10000 });
+          console.log(`User ${username} submitted second form`);
+
+          // Confirm second success (expand selector for more possible confirmation texts/locations)
+          await page
+            .waitForSelector(
+              "text=موفقیت|پیش‌نویس با موفقیت ذخیره شد.|Task completed|ارسال شد|ذخیره شد|success|ثبت شد", // Add more variants
+              { timeout: 20000 },
+            )
+            .then(() =>
+              console.log(
+                `User ${username} - Second form submitted successfully`,
+              ),
+            )
+            .catch(() =>
+              console.log(`User ${username} - No second confirmation detected`),
+            );
+        } catch (err) {
+          console.log(
+            `User ${username} - Second form handling failed: ${err.message}`,
+          );
+        }
         return {
           index,
           username,
