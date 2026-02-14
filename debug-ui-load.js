@@ -3,8 +3,8 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 
 const APP_URL = process.env.APP_URL || "http://localhost:4200/login";
-const NUM_USERS = parseInt(process.argv[2], 10) || 1;
-const LAUNCH_HEADLESS = false; // Set to false for visible browsers (headful mode)
+const NUM_USERS = parseInt(process.argv[2], 10) || 5;
+const LAUNCH_HEADLESS = true; // Set to false for visible browsers (headful mode)
 const NAV_TIMEOUT = 30000;
 
 const LOGIN_USERNAME_SELECTOR = "#username";
@@ -14,14 +14,11 @@ const ADD_DRAFT_BUTTON_SELECTOR = "#start-process-btn"; // "افزودن پیش 
 const MODAL_SELECTOR = "#user-task-modal";
 const FORM_READY_LOG = "FORM_READY"; // Optional: If your app logs this in console for modal ready
 
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
-
 (async () => {
   console.log(
     `Starting UI test: Opening ${APP_URL} in ${NUM_USERS} concurrent contexts...`,
   );
 
-  // Launch Playwright browser, fallback to system Chrome if Playwright-managed browsers unavailable
   const launchOptions = { headless: LAUNCH_HEADLESS, args: ["--no-sandbox"] };
   let browser;
   try {
@@ -33,7 +30,7 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
     browser = await chromium.launch({ ...launchOptions, executablePath: exe });
   }
 
-  // Create contexts and pages
+  // Create contexts and pages for users
   const contexts = [];
   for (let i = 0; i < NUM_USERS; i++) {
     const ctx = await browser.newContext();
@@ -50,8 +47,15 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
   const results = await Promise.all(
     contexts.map(async (c) => {
       const { index, page, consoleMessages } = c;
-      const username = "1"; // "1", "2", etc.
-      const password = AUTH_PASSWORD;
+      const users = [
+        // { username: "0", password: "123" },
+        { username: "1", password: "ABC" },
+        { username: "2", password: "123ABC" },
+      ];
+      const user = users[index % users.length];
+      const username = user.username;
+      const password = user.password;
+      await page.waitForTimeout(1000 * index); // 1s per user
 
       try {
         // 1. Navigate to login and automate login
@@ -64,7 +68,7 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
         await page.click(LOGIN_SUBMIT_SELECTOR);
 
         // Confirm login success by URL change
-        await page.waitForURL("**/user-panel", { timeout: 20000 });
+        await page.waitForURL("**/user-panel", { timeout: 60000 });
         console.log(`User ${username} logged in and redirected`);
 
         // 2. Navigate to "پیش نویس" page
@@ -102,11 +106,11 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
           setTimeout(() => {
             clearInterval(interval);
             resolve(null);
-          }, 25000);
+          }, 30000);
         });
 
         const waitForModal = page
-          .waitForSelector(MODAL_SELECTOR, { timeout: 20000 })
+          .waitForSelector(MODAL_SELECTOR, { timeout: 25000 })
           .then(() => ({ method: "dom", ts: Date.now() }))
           .catch(() => null);
 
@@ -120,7 +124,7 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
         let modal = page.locator(MODAL_SELECTOR);
 
         // Give Form.io time to load APIs
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(20000);
 
         // Text fields & textareas (skip hidden)
         const textFields = await modal
@@ -161,7 +165,7 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
             await container.click(); // Open dropdown
             await page.waitForSelector(
               ".choices__list--dropdown .choices__item--selectable",
-              { timeout: 10000 },
+              { timeout: 20000 },
             );
             await page
               .locator(".choices__list--dropdown .choices__item--selectable")
@@ -205,7 +209,7 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || "ABC";
           });
 
           // Give Form.io time to load APIs for second form
-          await page.waitForTimeout(2000);
+          await page.waitForTimeout(20000);
 
           modal = page.locator(MODAL_SELECTOR);
 
